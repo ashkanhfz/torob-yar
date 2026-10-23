@@ -56,3 +56,13 @@ Elasticsearch 9.5.5 روی همین رایانه با ۲۲۵٬۹۰۳ سند فع
 ## اصلاح بر اساس تصویر ارسالی
 
 رنگ پیش‌فرض سرمه‌ای `#16222c`، نوارها `#202d38` و متن فرعی `#9bafc5` شد؛ صفحهٔ اصلی دارای جستجوی مرکزی، نشان سفید مستقل و نوار ابزار پایین است. تم روشن نیز قابل انتخاب و انتخاب جدید در مرورگر ذخیره می‌شود. مسیریابی نسخهٔ عمومی به OSRM عمومی با کنترل مصرف متصل شد؛ محلی همچنان خودمیزبان است.
+
+## Faster browsing and focused decisions
+
+- The server loads a build-time inverted-index snapshot; content hashes invalidate snapshots when catalogue files change. Elasticsearch remains optional with the existing fallback.
+- `/api/products?ids=…` returns at most 24 requested products. The browser loads 24 cards first, fetches more on demand, cancels obsolete searches and keeps a bounded product cache. Deep links and restored comparisons no longer download the entire catalogue index.
+- JSON responses use gzip when supported; static assets support ETag revalidation. Product shard reads are limited to three at once and eight cached shards.
+- Compare two or three chosen products, then ask Liara AI about the actual shortlist. Recommendation IDs and cited spec pairs are checked against those products. Model reasoning text is advice; price and stock are not live.
+- AI answers are cached privately for one hour across restarts, bounded to 100 answers / 512 KB. Daily limits and request spacing remain in place; no automatic paid retry.
+- Each shop has a compact “before leaving” checklist, a product-specific inquiry message and optional personal notes. Checks are stored per product/shop, with a maximum of 40 local records.
+- The previously removed charger scenario page remains removed. Shop actions prioritize preparation, routing and saving, with secondary actions under “more”.

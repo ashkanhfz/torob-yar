@@ -2,6 +2,7 @@
 export function initCompanion(api) {
   const {state, storage, $, esc, fa, icon, modal, toast, openProduct, search, toggleCompare} = api;
   const readList=(key)=>{const value=storage.get(key,[]);return Array.isArray(value)?value:[]};
+  const restoreIds=readList('ty:compare').filter(x=>typeof x==='string').slice(0,3);let restoringCompare=restoreIds.length>0;
   let favorites=readList('ty:favorites').slice(0,80), recent=readList('ty:recent').slice(0,10);
   let searches=readList('ty:searches').filter(x=>typeof x==='string').slice(0,7);
   let savedSearches=readList('ty:saved-searches').slice(0,12);
@@ -27,7 +28,7 @@ export function initCompanion(api) {
     dock.hidden=!state.compare.length;document.body.classList.toggle('has-compare',!!state.compare.length);
     dock.innerHTML=`<div class="dock-label">${icon('compare')}<strong>${fa(state.compare.length)} انتخاب برای مقایسه</strong><small>حداکثر ۳ محصول</small></div><div class="dock-items">${state.compare.map(p=>`<div><span>${esc(p.title)}</span><button data-uncompare="${esc(p.id)}" aria-label="حذف ${esc(p.title)} از مقایسه">×</button></div>`).join('')}</div><button id="openCompareDock" class="primary" ${state.compare.length<2?'disabled':''}>مقایسه کن ${icon('arrow')}</button>`;
     $('#openCompareDock').onclick=()=>$('#compareBtn').click();
-    storage.set('ty:compare',state.compare.map(p=>p.id));
+    if(!restoringCompare)storage.set('ty:compare',state.compare.map(p=>p.id));
     $('#savedTop').innerHTML=icon('heart')+' برنامهٔ خرید <span class="count-pill">'+fa(state.plan.length)+'</span>';
   }
   function cards(items){return items.map(p=>`<article class="collection-card"><div><span class="category">${esc(p.category||'انتخاب شما')}</span><button data-product="${esc(p.id)}">${esc(p.title)}</button><p>${p.min?fa(p.min)+' تومان':'قیمت نامشخص'} <small>· ثبت‌شده</small></p></div>${favoriteButton(p)}</article>`).join('')}
@@ -46,11 +47,10 @@ export function initCompanion(api) {
     if(el.dataset.deleteSearch!==undefined){savedSearches.splice(Number(el.dataset.deleteSearch),1);storage.set('ty:saved-searches',savedSearches);showSearches()}
     if(el.id==='shareProduct')share(state.selected.id);
   });
-  document.addEventListener('keydown',e=>{if(e.key==='/'&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)&&!document.activeElement?.isContentEditable&&!$('#modal').open){e.preventDefault();$('#query').focus()}});
+  document.addEventListener('keydown',e=>{if(e.key==='/'&&!e.ctrlKey&&!e.metaKey&&!e.altKey&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)&&!document.activeElement?.isContentEditable&&!$('#modal').open){e.preventDefault();$(document.body.classList.contains('home')?'#homeQuery':'#query').focus()}});
   updateSuggestions();
-  const restoreIds=readList('ty:compare').filter(x=>typeof x==='string').slice(0,3);
   refresh();
-  return {refresh,favoriteButton,share,restoreIds,
+  return {refresh,favoriteButton,share,restoreIds,comparisonChanged(){restoringCompare=false},restoreCompare(products){if(restoringCompare){state.compare=products;restoringCompare=false;refresh()}},
     viewed(p){recent=[snapshot(p),...recent.filter(x=>x.id!==p.id)].slice(0,10);save();updateUrl(p.id)},
     catalog(){updateUrl()},
     searched(q){if(q){searches=[q,...searches.filter(x=>x!==q)].slice(0,7);storage.set('ty:searches',searches);updateSuggestions()}updateUrl()},
