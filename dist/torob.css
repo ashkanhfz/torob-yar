@@ -57,3 +57,5 @@ body,button,input,select,textarea{font-family:IRANYekan,Vazirmatn,Tahoma,sans-se
  .home .home-search{min-height:calc(100svh - 86px);padding:40px 20px 80px}.home-wordmark strong{font-size:32px}.home-wordmark{margin-bottom:24px}.home-search>p{line-height:1.9}.home-shortcuts{gap:4px}.home-shortcuts button{padding:4px 6px}
 }
 .home header{left:0;width:220px;justify-content:flex-end;padding:0 20px;background:var(--bg);border-bottom:1px solid var(--line)}.home .workspace-actions button{background:transparent}.home .workspace-actions button:hover{color:var(--red)}@media(max-width:760px){.home header{left:0;width:175px;padding:0 12px}}
+
+.offer-description p{white-space:pre-line;overflow-wrap:anywhere}#productGallery{margin-top:12px}

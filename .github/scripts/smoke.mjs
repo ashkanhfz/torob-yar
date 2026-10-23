@@ -36,6 +36,15 @@ const search = await json('/api/search?q=' + encodeURIComponent('کتانی') + 
 assert.ok(search.total > 0 && search.results.length > 0, 'The official catalogue must be searchable');
 const ids = search.results.map(row => row[0]);
 assert.ok(ids.every(id => /^product_[a-f0-9]{24}$/.test(id)));
+assert.equal(search.offset, 0);
+assert.equal(search.nextOffset, ids.length);
+assert.equal(search.hasMore, true);
+const next = await json('/api/search?q=' + encodeURIComponent('کتانی') + '&limit=3&offset=3' + (search.engine === 'inverted' ? '&engine=inverted' : ''));
+assert.equal(next.offset, 3);
+if (next.engine === search.engine) assert.ok(next.results.every(row => !ids.includes(row[0])), 'Pages must not repeat products');
+const fallback = await json('/api/search?q=' + encodeURIComponent('کتانی') + '&limit=3&engine=inverted');
+assert.equal(fallback.engine, 'inverted');
+assert.ok(fallback.results.length > 0, 'Internal index must remain usable');
 const details = await json('/api/products?ids=' + ids.join(','));
 assert.deepEqual(details.products.map(product => product.id), ids);
 assert.equal(details.missing.length, 0);
@@ -45,4 +54,4 @@ for (const pathname of ['/.env', '/server.mjs']) {
   assert.equal(response.status, 404, `Private file exposed: ${pathname}`);
   await response.arrayBuffer();
 }
-console.log(`PASS: ${base} — health, ${expected ? 'release, ' : ''}homepage, catalogue and private-file checks.`);
+console.log(`PASS: ${base} — health, ${expected ? 'release, ' : ''}homepage, catalogue, pagination, internal index and private-file checks.`);
