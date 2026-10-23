@@ -1,0 +1,16 @@
+import {test,before,after} from 'node:test';
+import assert from 'node:assert/strict';
+import {spawn} from 'node:child_process';
+import {rankRows} from '../dist/relevance.js';
+let child;const base='http://127.0.0.1:18789';
+before(async()=>{child=spawn(process.execPath,['server.mjs'],{env:{...process.env,PORT:'18789',AI_API_KEY:'',CALL_ADMIN_TOKEN:''},stdio:['ignore','pipe','pipe']});await new Promise((resolve,reject)=>{child.stdout.once('data',resolve);child.once('error',reject);child.once('exit',code=>reject(Error('server exited '+code)))})});
+after(()=>child?.kill());
+test('health explicitly reports unavailable external capabilities',async()=>{const r=await fetch(base+'/api/health');let j=await r.json();assert.equal(j.ok,true);assert.equal(j.assistant,false);assert.equal(j.syntheticPhones,true)});
+test('real dataset search returns linked product identities',async()=>{let r=await fetch(base+'/api/search?q='+encodeURIComponent('کتانی'));let j=await r.json();assert.ok(j.results.length>0);assert.ok(j.results.every(x=>x[0].startsWith('product_')))});
+test('budget excludes unknown and excessive prices',async()=>{let r=await fetch(base+'/api/search?q='+encodeURIComponent('کفش')+'&budget=1000000');let j=await r.json();assert.ok(j.results.every(x=>x[4]>0&&x[4]<=1000000))});
+test('assistant falls back honestly without credentials',async()=>{let r=await fetch(base+'/api/assistant',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:'برای روزمره چه مدلی بخرم؟',query:'کتانی',budget:5000000})});let j=await r.json();assert.equal(j.mode,'structured');assert.ok(j.products.length>0);assert.ok(j.message.includes('استعلام'))});
+test('calls cannot be triggered by an unauthenticated visitor',async()=>{let r=await fetch(base+'/api/call',{method:'POST',body:'{}'});assert.equal(r.status,401)});
+test('malformed request bodies return 400',async()=>{let r=await fetch(base+'/api/assistant',{method:'POST',body:'{oops'});assert.equal(r.status,400)});
+test('secrets and source are not served by the static server',async()=>{let r=await fetch(base+'/.env');assert.equal(r.status,404);r=await fetch(base+'/server.mjs');assert.equal(r.status,404)});
+test('homepage and compressed data envelope are served',async()=>{let r=await fetch(base+'/');assert.equal(r.status,200);assert.ok((await r.text()).includes('ترب‌یار'));r=await fetch(base+'/data/meta.json');assert.equal(r.status,200);assert.ok((await r.json()).gzip.length>100)});
+test('phone intent ranks phones before matching accessories',()=>{const rows=[['case','قاب گوشی سامسونگ','کیف و کاور گوشی'],['phone','گوشی موبایل سامسونگ A55','گوشی موبایل']];assert.equal(rankRows(rows,'گوشی سامسونگ')[0][0],'phone');assert.equal(rankRows(rows,'قاب گوشی سامسونگ')[0][0],'case')});

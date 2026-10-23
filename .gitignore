@@ -1,0 +1,12 @@
+node_modules/
+.env
+.env.*
+!.env.example
+.openai/
+.sites-local/
+.data/
+dist/data/
+work/
+*.zip
+*.tar.gz
+__pycache__/
