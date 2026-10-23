@@ -5,9 +5,10 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "check": "node --check server.mjs && node --check dist/app.js && node --check dist/search.js",
+    "check": "node --check server.mjs && node --check operations.mjs && node --check advisor.mjs && node --check dist/app.js && node --check dist/admin.js && node --check dist/market.js && node --check elastic.mjs && node --check entrypoint.mjs && node --check scripts/index-elastic.mjs && node --check dist/inverted.js",
     "test": "node --test tests/core.test.mjs",
-    "test:unit": "node --test tests/relevance.test.mjs tests/search.test.mjs"
+    "test:unit": "node --test tests/relevance.test.mjs tests/search.test.mjs tests/dates.test.mjs tests/operations.test.mjs tests/advisor.test.mjs tests/inverted.test.mjs",
+    "index:elastic": "node scripts/index-elastic.mjs"
   },
   "engines": {
     "node": ">=22"

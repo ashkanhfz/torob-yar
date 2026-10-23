@@ -10,3 +10,4 @@ work/
 *.zip
 *.tar.gz
 __pycache__/
+runtime/
