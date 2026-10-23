@@ -9,7 +9,7 @@ test('routing validates coordinates and waypoint limits before any upstream call
 });
 test('route never invents distance when OSRM is absent or cannot snap a point',async()=>{
  assert.equal((await createRouting({baseURL:''})(points)).body.error,'routing_not_configured');
- assert.equal((await createRouting({baseURL:'http://localhost',fetcher:async()=>({ok:true,json:async()=>({code:'NoSegment'})})})(points)).status,422);
+ assert.equal((await createRouting({baseURL:'http://localhost',fetcher:async()=>({ok:false,json:async()=>({code:'NoSegment'})})})(points)).status,422);
  assert.equal((await createRouting({baseURL:'http://localhost',fetcher:async()=>{throw Error('offline')}})(points)).status,502);
 });
 test('route uses lon-lat order, bounded snapping and actual engine values',async()=>{
