@@ -11,7 +11,7 @@ export function initCompanion(api) {
   const workspace=document.createElement('section');
   workspace.className='personal-strip';workspace.setAttribute('aria-label','خریدهای شما');
   workspace.innerHTML=`<div><span class="live-dot"></span><strong>خرید بعدی‌ات را از همین‌جا ادامه بده</strong><span class="personal-hint">انتخاب‌ها روی همین دستگاه می‌مانند</span></div><div class="workspace-actions"><button id="favoritesBtn">${icon('heart')} علاقه‌مندی‌ها <span id="favoriteCount">۰</span></button><button id="recentBtn">${icon('clock')} دیده‌های اخیر</button><button id="savedSearchesBtn">${icon('search')} جستجوهای من</button></div>`;
-  $('.steps').before(workspace);
+  $('.categories').after(workspace);
   const tools=document.createElement('div');tools.className='result-tools';
   tools.innerHTML='<button id="saveSearch">+ ذخیرهٔ این جستجو</button><button id="shareSearch">اشتراک لینک جستجو ↗</button><span>برای جستجوی سریع، کلید / را بزن</span>';
   $('#activeFilters').before(tools);
