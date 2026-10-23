@@ -26,7 +26,15 @@ let index,preparedPostings;
 function loadIndex(){return index ||= loadSearchSnapshot(path.join(root,'data')).then(async saved=>{if(saved){preparedPostings=saved.postings;return saved.rows}return (await Promise.all(Array.from({length:8},(_,i)=>data('index'+i)))).flat()}).catch(error=>{index=null;throw error})}
 let inverted,indexById;const elasticSearch=createElasticSearch();
 function rowMap(){return indexById ||= loadIndex().then(rows=>new Map(rows.map(r=>[r[0],r]))).catch(error=>{indexById=null;throw error})}
-async function searchPage(q,budget,options={}){const started=performance.now();const rows=await loadIndex();const byId=await rowMap();let result=await elasticSearch(q,budget,options);if(result){const resolved=result.ids.map(id=>byId.get(id));if(resolved.every(Boolean))result={results:resolved,total:result.total,engine:result.engine};else result=null}if(!result){inverted ||= createInvertedIndex(rows,preparedPostings);result=inverted.search(q,budget,options)}return {...result,took:Math.round(performance.now()-started)}}
+async function searchPage(q,budget,options={}){
+ const started=performance.now(),rows=await loadIndex(),byId=await rowMap();
+ const offset=options.offset||0,limit=options.limit||30;
+ let result=options.engine==='inverted'?null:await elasticSearch(q,budget,options);
+ if(result){const resolved=result.ids.map(id=>byId.get(id));if(resolved.every(Boolean)&&result.total>0)result={results:resolved,total:result.total,engine:result.engine,cached:!!result.cached};else result=null}
+ if(!result){inverted ||= createInvertedIndex(rows,preparedPostings);result=inverted.search(q,budget,options)}
+ const nextOffset=offset+result.results.length,hasMore=nextOffset<result.total&&result.results.length>0;
+ return {...result,offset,nextOffset:hasMore?nextOffset:null,hasMore,took:Math.round(performance.now()-started)};
+}
 async function search(q,budget){return (await searchPage(q,budget)).results}
 const productIdPattern=/^product_[a-f0-9]{24}$/;
 async function readProducts(ids){
@@ -49,7 +57,7 @@ const advisor=createAdvisor();
 const routeJourney=createRouting();
 const operations=createOperations({send,body,usage:()=>advisor.usage(),meta:()=>data('meta'),getIndex:async(refresh=false)=>{if(refresh){dataCache.clear();index=null;inverted=null;indexById=null;preparedPostings=null}return loadIndex()},getProduct:async(id)=>(await readProducts([id])).products[0]||null});
 const server=http.createServer(async(req,res)=>{try{let url=new URL(req.url,'http://localhost');
- if(url.pathname==='/api/health')return send(res,200,{ok:true,routing:!!process.env.OSRM_BASE_URL,assistant:!!(process.env.AI_API_KEY&&process.env.AI_BASE_URL&&process.env.AI_MODEL),calls:!!(process.env.CALL_ADAPTER_URL&&process.env.CALL_ADMIN_TOKEN),dataset:'v16',syntheticPhones:true});
+ if(url.pathname==='/api/health')return send(res,200,{ok:true,routing:!!process.env.OSRM_BASE_URL,assistant:!!(process.env.AI_API_KEY&&process.env.AI_BASE_URL&&process.env.AI_MODEL),calls:!!(process.env.CALL_ADAPTER_URL&&process.env.CALL_ADMIN_TOKEN),dataset:'v16',syntheticPhones:true,search:{primary:process.env.ELASTICSEARCH_URL?'elasticsearch':'inverted',fallback:'inverted',elasticsearch:elasticSearch.status()}});
  if(url.pathname.startsWith('/api/')&&!allowed(req))return send(res,429,{error:'rate_limit'});
  if(await operations.route(req,res,url))return;
  if(url.pathname==='/api/route'&&req.method==='POST'){
@@ -57,7 +65,7 @@ const server=http.createServer(async(req,res)=>{try{let url=new URL(req.url,'htt
   let input;try{input=await body(req)}catch{return send(res,400,{error:'invalid_route_points'})}
   const result=await routeJourney(input.points);return send(res,result.status,result.body);
  }
- if(url.pathname==='/api/search'&&req.method==='GET')return send(res,200,await searchPage((url.searchParams.get('q')||'').slice(0,200),Number(url.searchParams.get('budget'))||0,{limit:Math.min(160,Math.max(1,Number(url.searchParams.get('limit'))||30)),sort:url.searchParams.get('sort')==='cheap'?'cheap':'relevance'}));
+ if(url.pathname==='/api/search'&&req.method==='GET')return send(res,200,await searchPage((url.searchParams.get('q')||'').slice(0,200),Number(url.searchParams.get('budget'))||0,{limit:Math.min(160,Math.max(1,Math.floor(Number(url.searchParams.get('limit')))||30)),offset:Math.min(1000000,Math.max(0,Math.floor(Number(url.searchParams.get('offset')))||0)),sort:url.searchParams.get('sort')==='cheap'?'cheap':'relevance',engine:url.searchParams.get('engine')==='inverted'?'inverted':undefined}));
  if(url.pathname==='/api/products'&&req.method==='GET'){
   const ids=(url.searchParams.get('ids')||'').split(',');
   if(!ids.length||ids.length>24||ids.some(id=>!productIdPattern.test(id)))return send(res,400,{error:'invalid_product_ids'});

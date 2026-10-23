@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
 import {rankRows} from '../dist/relevance.js';
 let child;const base='http://127.0.0.1:18789';
-before(async()=>{child=spawn(process.execPath,['server.mjs'],{env:{...process.env,PORT:'18789',AI_API_KEY:'',CALL_ADMIN_TOKEN:''},stdio:['ignore','pipe','pipe']});await new Promise((resolve,reject)=>{child.stdout.once('data',resolve);child.once('error',reject);child.once('exit',code=>reject(Error('server exited '+code)))})});
+before(async()=>{child=spawn(process.execPath,['server.mjs'],{env:{...process.env,PORT:'18789',AI_API_KEY:'',CALL_ADMIN_TOKEN:'',ELASTICSEARCH_URL:''},stdio:['ignore','pipe','pipe']});await new Promise((resolve,reject)=>{child.stdout.once('data',resolve);child.once('error',reject);child.once('exit',code=>reject(Error('server exited '+code)))})});
 after(()=>child?.kill());
 test('health explicitly reports unavailable external capabilities',async()=>{const r=await fetch(base+'/api/health');let j=await r.json();assert.equal(j.ok,true);assert.equal(j.assistant,false);assert.equal(j.syntheticPhones,true)});
 test('real dataset search returns linked product identities',async()=>{let r=await fetch(base+'/api/search?q='+encodeURIComponent('کتانی'));let j=await r.json();assert.ok(j.results.length>0);assert.equal(j.engine,'inverted');assert.ok(j.total>=j.results.length);assert.ok(j.results.every(x=>x[0].startsWith('product_')))});
@@ -38,4 +38,14 @@ test('static assets revalidate without downloading unchanged content',async()=>{
 test('reading product batches has a separate allowance from paid and mutating routes',async()=>{
  for(let i=0;i<24;i++)assert.equal((await fetch(base+'/api/products?ids=bad')).status,400);
  const response=await fetch(base+'/api/assistant',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:'مقایسه',productIds:products})});assert.equal(response.status,200);
+});
+
+test('search pages preserve identities and expose lazy-loading boundaries',async()=>{
+ const query='/api/search?q='+encodeURIComponent('گوشی سامسونگ')+'&engine=inverted';
+ const read=async suffix=>(await (await fetch(base+query+suffix)).json());
+ const [first,second,full]=await Promise.all([read('&limit=24'),read('&limit=24&offset=24'),read('&limit=48')]);
+ assert.equal(first.offset,0);assert.equal(first.nextOffset,24);assert.equal(first.hasMore,true);assert.equal(second.offset,24);
+ assert.deepEqual([...first.results,...second.results],full.results);assert.equal(new Set(full.results.map(r=>r[0])).size,full.results.length);
+ const end=await read('&offset=999999');assert.equal(end.results.length,0);assert.equal(end.nextOffset,null);assert.equal(end.hasMore,false);
+ const health=await (await fetch(base+'/api/health')).json();assert.equal(health.search.fallback,'inverted');assert.equal(health.search.elasticsearch.configured,false);
 });
