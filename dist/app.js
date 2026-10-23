@@ -17,10 +17,11 @@ const state={products:[],shown:16,compare:[],point:storage.get('point',{lat:35.7
 let resultRows=[],searchAbort,navigation=0,catalogScroll=0;const productCache=new Map();
 const cache=new Map();let shops={},meta={},guide={category:'کفش',use:'روزمره',budget:''};
 async function json(url){if(!cache.has(url))cache.set(url,fetch(url).then(async r=>{if(!r.ok)throw Error('خطا در دریافت اطلاعات');const payload=await r.json();const bytes=Uint8Array.from(atob(payload.gzip),c=>c.charCodeAt(0));const stream=new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));return JSON.parse(await new Response(stream).text())}).catch(e=>{cache.delete(url);throw e}));return cache.get(url)}
-function toast(t){$('#toast').textContent=t;$('#toast').style.display='block';clearTimeout(toast.timer);toast.timer=setTimeout(()=>$('#toast').style.display='none',4200)}
-function modal(html){$('#modalBody').innerHTML=html; if(!$('#modal').open)$('#modal').showModal()}
+function toast(t){const node=$('#toast'),dialog=$('#modal'),host=dialog.open?dialog:document.body;if(node.parentElement!==host)host.append(node);node.textContent=t;node.style.display='block';clearTimeout(toast.timer);toast.timer=setTimeout(()=>node.style.display='none',4200)}
+function modal(html){$('#toast').style.display='none';$('#modalBody').innerHTML=html; if(!$('#modal').open)$('#modal').showModal()}
 function close(){$('#modal').close()}
 $('#closeModal').onclick=close;$('#modal').addEventListener('click',e=>{if(e.target===$('#modal'))close()});
+$('#modal').addEventListener('close',()=>{const node=$('#toast');if(node.parentElement===$('#modal')){node.style.display='none';document.body.append(node)}});
 function img(p,cls=''){const fallback=`<span class="placeholder">${icon('picture')}<small>تصویر در دسترس نیست</small></span>`;return p.image&&/^https:\/\//.test(p.image)?`<img class="${esc(cls)}" src="${esc(p.image)}" alt="${esc(p.title)}" loading="lazy" referrerpolicy="no-referrer" onerror="this.outerHTML=${esc(JSON.stringify(fallback))}">`:fallback}
 function distance(s){if(!s||!Number.isFinite(s.lat)||!Number.isFinite(s.lon))return null;let rad=x=>x*Math.PI/180,a=rad(s.lat-state.point.lat),b=rad(s.lon-state.point.lon);return 6371*2*Math.asin(Math.sqrt(Math.sin(a/2)**2+Math.cos(rad(s.lat))*Math.cos(rad(state.point.lat))*Math.sin(b/2)**2))}
 function visit(){const v=$('#visitTime').value;return v?new Date(v+'+03:30'):new Date()}

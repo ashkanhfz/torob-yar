@@ -216,6 +216,7 @@ dialog textarea { width: 100%; min-height: 100px; resize: vertical; line-height:
 .plan-item { padding: 18px; border: 1px solid var(--line); border-radius: 9px; margin: 14px 0; }
 .plan-item p { font-size: 12px; }
 #toast { display: none; position: fixed; z-index: 20; bottom: 24px; left: 50%; transform: translateX(-50%); max-width: min(90vw,570px); color: #fff; background: #30343b; border-radius: 9px; padding: 12px 20px; box-shadow: 0 5px 25px #0002; font-size: 12px; text-align: center; }
+dialog #toast { bottom: 24px; pointer-events: none; }
 .mobile-only, .views .mobile-only { display: none; }
 .mobile-plan { align-items: center; justify-content: center; width: 36px; min-height: 36px; padding: 6px; border-color: transparent; }
 .dark { color-scheme: dark; --bg: #19232d; --surface: #222e39; --ink: #e9edf2; --muted: #a4b0bd; --line: #34414e; --red-light: #342830; --shadow: 0 6px 24px #0002; }

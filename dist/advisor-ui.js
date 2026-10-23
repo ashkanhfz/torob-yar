@@ -5,7 +5,12 @@ export function initAdvisorUI({state,$,esc,fa,modal,toast,search,close,parseAmou
   modal(`<section class="advisor-panel"><p class="small">راهنمای انتخاب</p><h2>${comparison?'کدام گزینه به نیازت نزدیک‌تر است؟':'برای انتخاب بهتر کمک بگیر'}</h2>${comparison?`<div class="advisor-shortlist">${selected.map((p,i)=>`<span>${fa(i+1)}. ${esc(p.title)}</span>`).join('')}</div>`:`<label>چه کالایی می‌خواهی؟<input id="advisorQuery" value="${esc(state.query)}" placeholder="مثلاً شارژر گوشی سامسونگ" maxlength="200"></label>`}<label>چه چیزی برایت مهم‌تر است؟<textarea id="advisorMessage" rows="3" maxlength="1200" placeholder="مثلاً هر روز همراهم است؛ وزن کمتر مهم‌تر از امکانات بیشتر است."></textarea></label><p class="small">با زدن بررسی، پیام و مشخصات این گزینه‌ها به هوش لیارا فرستاده می‌شود.</p><button id="advisorSend" class="primary">${comparison?'مقایسه بر اساس نیاز من':'بررسی گزینه‌ها'}</button><div id="advisorAnswer" role="status" aria-live="polite" hidden></div></section>`);
   const button=$('#advisorSend'),box=$('#advisorAnswer'),input=$('#advisorMessage');input.focus();
   button.onclick=async()=>{
-   const message=input.value.trim(),query=comparison?selected[0].category:$('#advisorQuery').value.trim();if(!message||!query)return toast('نام کالا و نیازت را بنویس.');
+   const queryInput=$('#advisorQuery'),message=input.value.trim(),query=comparison?selected[0].category:queryInput.value.trim();
+   input.removeAttribute('aria-invalid');input.removeAttribute('aria-describedby');queryInput?.removeAttribute('aria-invalid');queryInput?.removeAttribute('aria-describedby');
+   if(!message||!query){
+    const missing=!query&&queryInput?queryInput:input;box.hidden=false;box.setAttribute('role','alert');box.textContent=!query&&queryInput?'نام کالایی را که می‌خواهی بنویس.':'بگو چه چیزی در انتخاب برایت مهم‌تر است.';missing.setAttribute('aria-invalid','true');missing.setAttribute('aria-describedby','advisorAnswer');missing.focus();return;
+   }
+   box.setAttribute('role','status');
    button.disabled=true;button.textContent='در حال بررسی…';box.hidden=false;box.innerHTML='<p class="small">مشخصات گزینه‌ها را با نیازت مقایسه می‌کنم…</p>';
    try{
     const r=await fetch('/api/assistant',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message,query,budget:parseAmount($('#budget').value)||0,...(comparison?{productIds:selected.map(p=>p.id)}:{})}),signal:AbortSignal.timeout(45000)});if(!r.ok)throw Error();const j=await r.json();if(!box.isConnected)return;
