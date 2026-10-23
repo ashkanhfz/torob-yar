@@ -1,6 +1,6 @@
 FROM node:22-alpine
 WORKDIR /app
-COPY package.json server.mjs operations.mjs advisor.mjs elastic.mjs entrypoint.mjs ./
+COPY package.json server.mjs operations.mjs advisor.mjs elastic.mjs routing.mjs entrypoint.mjs ./
 COPY dist ./dist
 ENV NODE_ENV=production
 ENV PORT=3000

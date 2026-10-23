@@ -1,3 +1,4 @@
+import {createRouting} from './routing.mjs';
 import {createInvertedIndex} from './dist/inverted.js';
 import {createElasticSearch} from './elastic.mjs';
 import {createAdvisor} from './advisor.mjs';
@@ -26,11 +27,17 @@ const rate=new Map();
 function allowed(req){let k=req.socket.remoteAddress,t=Date.now(),s=rate.get(k);if(!s||t-s.at>60000){rate.set(k,{at:t,n:1});if(rate.size>10000)rate.clear();return true}return ++s.n<=20}
 function authorized(req){const expected=process.env.CALL_ADMIN_TOKEN||'',given=(req.headers.authorization||'').replace(/^Bearer /,'');return expected.length>20&&given.length===expected.length&&timingSafeEqual(Buffer.from(given),Buffer.from(expected))}
 const advisor=createAdvisor();
+const routeJourney=createRouting();
 const operations=createOperations({send,body,usage:()=>advisor.usage(),meta:()=>data('meta'),getIndex:async(refresh=false)=>{if(refresh){dataCache.clear();index=null;inverted=null;indexById=null}return loadIndex()},getProduct:async(id)=>{const row=(await loadIndex()).find(x=>x[0]===id);return row?(await data('p'+row[3]))[id]:null}});
 const server=http.createServer(async(req,res)=>{try{let url=new URL(req.url,'http://localhost');
- if(url.pathname==='/api/health')return send(res,200,{ok:true,assistant:!!(process.env.AI_API_KEY&&process.env.AI_BASE_URL&&process.env.AI_MODEL),calls:!!(process.env.CALL_ADAPTER_URL&&process.env.CALL_ADMIN_TOKEN),dataset:'v16',syntheticPhones:true});
+ if(url.pathname==='/api/health')return send(res,200,{ok:true,routing:!!process.env.OSRM_BASE_URL,assistant:!!(process.env.AI_API_KEY&&process.env.AI_BASE_URL&&process.env.AI_MODEL),calls:!!(process.env.CALL_ADAPTER_URL&&process.env.CALL_ADMIN_TOKEN),dataset:'v16',syntheticPhones:true});
  if(url.pathname.startsWith('/api/')&&!allowed(req))return send(res,429,{error:'rate_limit'});
  if(await operations.route(req,res,url))return;
+ if(url.pathname==='/api/route'&&req.method==='POST'){
+  if(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host)return send(res,403,{error:'origin_not_allowed'});
+  let input;try{input=await body(req)}catch{return send(res,400,{error:'invalid_route_points'})}
+  const result=await routeJourney(input.points);return send(res,result.status,result.body);
+ }
  if(url.pathname==='/api/search'&&req.method==='GET')return send(res,200,await searchPage((url.searchParams.get('q')||'').slice(0,200),Number(url.searchParams.get('budget'))||0,{limit:Math.min(160,Math.max(1,Number(url.searchParams.get('limit'))||30)),sort:url.searchParams.get('sort')==='cheap'?'cheap':'relevance'}));
  if(url.pathname==='/api/assistant'&&req.method==='POST'){
   if(req.headers.origin&&new URL(req.headers.origin).host!==req.headers.host)return send(res,403,{error:'origin_not_allowed'});
