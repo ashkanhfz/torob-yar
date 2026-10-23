@@ -139,14 +139,20 @@ jobs:
       - name: Deploy to the existing application
         env:
           LIARA_API_TOKEN: ${{ secrets.LIARA_API_TOKEN }}
+          LIARA_TEAM_ID: ${{ vars.LIARA_TEAM_ID }}
           RELEASE_SHA: ${{ github.sha }}
         run: |
           if [ -z "$LIARA_API_TOKEN" ]; then
             echo '::error::The repository secret LIARA_API_TOKEN is required for deployment.'
             exit 1
           fi
+          if [ -z "$LIARA_TEAM_ID" ]; then
+            echo '::error::The repository variable LIARA_TEAM_ID is required for this team-owned application.'
+            exit 1
+          fi
           liara deploy --app torob-yar-next-1023 --platform docker --port 3000 \
-            --api-token "$LIARA_API_TOKEN" --no-app-logs --message "GitHub main $RELEASE_SHA"
+            --api-token "$LIARA_API_TOKEN" --team-id "$LIARA_TEAM_ID" \
+            --no-app-logs --message "GitHub main $RELEASE_SHA"
       - name: Verify production is serving this exact commit
         env:
           SMOKE_BASE_URL: https://torob-yar-next-1023.liara.run
