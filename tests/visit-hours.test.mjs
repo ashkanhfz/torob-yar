@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {visitStatus,kmBetween} from '../dist/visit-hours.js';
+const shift=(a,b)=>({status:'open',shifts:[{start_time:a,end_time:b}]});
+test('overnight belongs to previous day, not the following evening',()=>{const s={weekly_hours:{thu:shift('20:00','02:00'),fri:{status:'closed'}}};assert.equal(visitStatus(s,'2026-10-23T01:00:00+03:30').open,true);assert.equal(visitStatus(s,'2026-10-23T23:30:00+03:30').open,false);const other={weekly_hours:{thu:{status:'closed'},fri:shift('20:00','02:00')}};assert.equal(visitStatus(other,'2026-10-23T01:00:00+03:30').open,false)});
+test('closing boundary and shopping margin',()=>{const s={weekly_hours:{fri:shift('09:00','23:45')}};assert.deepEqual(visitStatus(s,'2026-10-23T23:30:00+03:30',30),{open:true,remaining:15,enough:false});assert.equal(visitStatus(s,'2026-10-23T23:45:00+03:30').open,false)});
+test('missing hours and coordinates stay unknown',()=>{assert.equal(visitStatus({},new Date()).open,null);assert.equal(visitStatus({},'invalid').open,null);assert.equal(kmBetween({lat:0,lon:0},{}),null);assert.equal(kmBetween({lat:0,lon:0},{lat:0,lon:0}),0)});
