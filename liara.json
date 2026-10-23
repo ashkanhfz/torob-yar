@@ -1,1 +1,6 @@
-{"platform":"docker","port":3000,"disks":[]}
+{
+  "platform": "docker",
+  "port": 3000,
+  "disks": [],
+  "app": "torob-yar-next-1023"
+}
