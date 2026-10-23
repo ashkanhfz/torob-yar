@@ -1,18 +1,159 @@
-name: Source checks
-on: [push, pull_request, workflow_dispatch]
+name: CI and CD
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
 permissions:
   contents: read
+
+# Keep an active production release running; superseded feature checks can stop.
+concurrency:
+  group: ci-cd-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
-  unit:
+  checks:
+    name: Syntax and unit tests
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          node-version: 22
-      - uses: actions/setup-python@v5
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: '3.12'
       - run: npm run check
       - run: npm run test:unit
       - run: python -m py_compile scripts/setup_data.py scripts/import_dataset.py scripts/verify_data.py
+
+  build:
+    name: Official dataset and Docker verification
+    needs: checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      DATASET_SHA256: b0afb47b2b70f65c6d8ec07b7423dcc49efc71cd7a27e95606fb81da008c210d
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: '3.12'
+      - name: Restore official archive
+        id: dataset-cache
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: .data/official-v16.zip
+          key: official-v16-${{ env.DATASET_SHA256 }}
+      - name: Download official archive
+        if: steps.dataset-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p .data
+          curl --fail --location --retry 3 --connect-timeout 30 --max-time 600 \
+            'https://startech.s3.ir-central1.arvanstorage.ir/starcoach-dataset-v16-cap300-csv.zip?versionId=' \
+            --output .data/official-v16.zip
+      - name: Check archive integrity and rebuild application data
+        run: |
+          printf '%s  %s\n' "$DATASET_SHA256" '.data/official-v16.zip' | sha256sum --check --strict
+          python scripts/setup_data.py --archive .data/official-v16.zip
+          npm run index:prepare
+      - name: Test API against the complete dataset without paid services
+        env:
+          AI_API_KEY: ''
+          AI_BASE_URL: ''
+          AI_MODEL: ''
+          ELASTICSEARCH_URL: ''
+          OSRM_BASE_URL: ''
+          CALL_ADMIN_TOKEN: ''
+        run: npm test
+      - name: Stamp the tested release
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          node --input-type=module <<'NODE'
+          import {writeFileSync} from 'node:fs';
+          writeFileSync('dist/release.json', JSON.stringify({sha: process.env.RELEASE_SHA, dataset: 'v16'}) + '\n');
+          NODE
+      - name: Build production image
+        run: docker build --tag torob-yar:ci .
+      - name: Run production image within the deployment memory limit
+        run: docker run --detach --name torob-yar-ci --memory 512m --cpus 0.5 --publish 127.0.0.1:3000:3000 torob-yar:ci
+      - name: Verify the running Docker image
+        env:
+          SMOKE_BASE_URL: http://127.0.0.1:3000
+          EXPECTED_RELEASE_SHA: ${{ github.sha }}
+        run: node .github/scripts/smoke.mjs
+      - name: Show container diagnostics on failure
+        if: failure()
+        run: docker logs torob-yar-ci 2>/dev/null || true
+      - name: Stop the test container
+        if: always()
+        run: docker rm --force torob-yar-ci 2>/dev/null || true
+      - name: Preserve the verified dataset for deployment
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: prepared-dataset-${{ github.sha }}
+          path: |
+            dist/data/
+            dist/release.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  deploy:
+    name: Deploy verified main to Liara
+    needs: build
+    if: github.repository == 'ashkanhfz/torob-yar' && github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    concurrency:
+      group: liara-torob-yar-production
+      cancel-in-progress: false
+    environment:
+      name: production
+      url: https://torob-yar-next-1023.liara.run
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: prepared-dataset-${{ github.sha }}
+          path: dist
+      - name: Install pinned Liara CLI
+        run: npm install --global @liara/cli@9.6.0
+      - name: Deploy to the existing application
+        env:
+          LIARA_API_TOKEN: ${{ secrets.LIARA_API_TOKEN }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          if [ -z "$LIARA_API_TOKEN" ]; then
+            echo '::error::The repository secret LIARA_API_TOKEN is required for deployment.'
+            exit 1
+          fi
+          liara deploy --app torob-yar-next-1023 --platform docker --port 3000 \
+            --api-token "$LIARA_API_TOKEN" --no-app-logs --message "GitHub main $RELEASE_SHA"
+      - name: Verify production is serving this exact commit
+        env:
+          SMOKE_BASE_URL: https://torob-yar-next-1023.liara.run
+          EXPECTED_RELEASE_SHA: ${{ github.sha }}
+        run: node .github/scripts/smoke.mjs
+      - name: Record deployment result
+        env:
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          printf 'Deployed and verified `%s` at https://torob-yar-next-1023.liara.run\n' "$RELEASE_SHA" >> "$GITHUB_STEP_SUMMARY"
