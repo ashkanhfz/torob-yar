@@ -93,6 +93,23 @@ jobs:
           SMOKE_BASE_URL: http://127.0.0.1:3000
           EXPECTED_RELEASE_SHA: ${{ github.sha }}
         run: node .github/scripts/smoke.mjs
+      - name: Preserve the tested image's private search snapshot
+        run: |
+          mkdir -p dist/.build
+          docker cp torob-yar-ci:/app/.cache/search-index.v8 dist/.build/search-index.v8
+      - name: Verify the prepared deployment image and snapshot provenance
+        env:
+          SMOKE_BASE_URL: http://127.0.0.1:3000
+          EXPECTED_RELEASE_SHA: ${{ github.sha }}
+        run: |
+          docker build --tag torob-yar:prepared .
+          expected_snapshot=$(sha256sum dist/.build/search-index.v8 | cut -d ' ' -f 1)
+          actual_snapshot=$(docker run --rm torob-yar:prepared sha256sum /app/.cache/search-index.v8 | cut -d ' ' -f 1)
+          test "$expected_snapshot" = "$actual_snapshot"
+          docker run --rm torob-yar:prepared node -p 'JSON.stringify({node:process.version,v8:process.versions.v8})'
+          docker rm --force torob-yar-ci
+          docker run --detach --name torob-yar-ci --memory 512m --cpus 0.5 --publish 127.0.0.1:3000:3000 torob-yar:prepared
+          node .github/scripts/smoke.mjs
       - name: Show container diagnostics on failure
         if: failure()
         run: docker logs torob-yar-ci 2>/dev/null || true
@@ -107,7 +124,9 @@ jobs:
           path: |
             dist/data/
             dist/release.json
+            dist/.build/search-index.v8
           if-no-files-found: error
+          include-hidden-files: true
           compression-level: 0
           retention-days: 1
 

@@ -49,7 +49,7 @@ const details = await json('/api/products?ids=' + ids.join(','));
 assert.deepEqual(details.products.map(product => product.id), ids);
 assert.equal(details.missing.length, 0);
 assert.ok(details.products.every(product => product.title && product.offers.length));
-for (const pathname of ['/.env', '/server.mjs']) {
+for (const pathname of ['/.env', '/server.mjs', '/.cache/search-index.v8', '/.build/search-index.v8']) {
   const response = await fetch(endpoint(pathname), {signal: AbortSignal.timeout(10000)});
   assert.equal(response.status, 404, `Private file exposed: ${pathname}`);
   await response.arrayBuffer();
