@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "start": "node server.mjs",
-    "check": "node --check server.mjs && node --check dist/app.js",
+    "check": "node --check server.mjs && node --check dist/app.js && node --check dist/search.js",
     "test": "node --test tests/core.test.mjs",
-    "test:unit": "node --test tests/relevance.test.mjs"
+    "test:unit": "node --test tests/relevance.test.mjs tests/search.test.mjs"
   },
   "engines": {
     "node": ">=22"

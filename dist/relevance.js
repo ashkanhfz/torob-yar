@@ -1,4 +1,4 @@
-const norm=s=>String(s||'').toLowerCase().replace(/ي/g,'ی').replace(/ك/g,'ک').replace(/[\u200c\s\-_/،]+/g,' ').trim();
+import {normalizeSearch as norm} from './search.js';
 export function rankRows(rows,query){
  const q=norm(query),terms=q.split(' ').filter(Boolean);
  function score(r){const title=norm(r[1]),cat=norm(r[2]);let s=terms.filter(t=>title.includes(t)).length*4+terms.filter(t=>cat.includes(t)).length*3;

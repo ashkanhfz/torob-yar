@@ -6,11 +6,15 @@ import {gunzipSync} from 'node:zlib';
 import {timingSafeEqual} from 'node:crypto';
 import {rankRows} from './dist/relevance.js';
 const root=path.resolve(fileURLToPath(new URL('./dist/',import.meta.url)));
-const norm=s=>String(s||'').toLowerCase().replace(/ي/g,'ی').replace(/ك/g,'ک').replace(/[\u200c\s\-_/،]+/g,' ').trim();
+import {parseSearchIntent, matchesQuery} from './dist/search.js';
 const dataCache=new Map();
 async function data(n){if(!dataCache.has(n))dataCache.set(n,readFile(path.join(root,'data',n+'.json')).then(x=>JSON.parse(gunzipSync(Buffer.from(JSON.parse(x).gzip,'base64')))).catch(e=>{dataCache.delete(n);throw e}));return dataCache.get(n)}
 let index;
-async function search(q,budget){index||=Promise.all(Array.from({length:8},(_,i)=>data('index'+i))).then(x=>x.flat());let terms=norm(q).split(' ').filter(Boolean);return rankRows((await index).filter(x=>terms.every(t=>norm(x[1]+' '+x[2]).includes(t))&&(!budget||(x[4]>0&&x[4]<=budget))),q).slice(0,30)}
+async function search(q,budget){
+ index ||= Promise.all(Array.from({length:8},(_,i)=>data('index'+i))).then(x=>x.flat()).catch(error=>{index=null;throw error});
+ const intent=parseSearchIntent(q), ceiling=intent.budget || Math.max(0, Number(budget)||0);
+ return rankRows((await index).filter(row=>matchesQuery(row,intent.query)&&(!ceiling||(row[4]>0&&row[4]<=ceiling))),intent.query).slice(0,30);
+}
 function send(res,status,value){res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'});res.end(JSON.stringify(value))}
 async function body(req){let chunks=[],size=0;for await(const chunk of req){size+=chunk.length;if(size>16000)throw Error('body_too_large');chunks.push(chunk)}return JSON.parse(Buffer.concat(chunks).toString()||'{}')}
 const rate=new Map();
