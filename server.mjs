@@ -9,7 +9,7 @@ import {readFile,stat} from 'node:fs/promises';
 import {createReadStream} from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {gunzipSync,gzip} from 'node:zlib';
+import {gunzipSync,gzip,createGzip} from 'node:zlib';
 import {timingSafeEqual} from 'node:crypto';
 const root=path.resolve(fileURLToPath(new URL('./dist/',import.meta.url)));
 const dataCache=new Map(),dataPending=new Map(),shardWaiters=[];let shardReads=0;
@@ -49,6 +49,36 @@ function send(res,status,value){
  const finish=(buffer,compressed=false)=>{res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Content-Length':Buffer.byteLength(buffer),'Vary':'Accept-Encoding',...(compressed?{'Content-Encoding':'gzip'}:{})});res.end(buffer)};
  if(serialized.length>1024&&/\bgzip\b/.test(req?.headers['accept-encoding']||''))gzip(serialized,(error,buffer)=>error?finish(serialized):finish(buffer,true));else finish(serialized);
 }
+// Keep compressed transport assets bounded independently from the catalogue cache.
+const staticGzipCache=new Map(),staticGzipPending=new Map(),staticGzipWaiters=[];
+const STATIC_CACHE_BYTES=8*1024*1024,STATIC_READ_BYTES=4*1024*1024;
+let staticGzipBytes=0,staticGzipReads=0;
+function acceptsGzip(value=''){
+ const accepted=new Map();
+ for(const entry of String(value).split(',')){
+  const [name,...parameters]=entry.trim().toLowerCase().split(';');let quality=1;
+  for(const parameter of parameters){const match=parameter.trim().match(/^q\s*=\s*(.*)$/);if(match)quality=/^(?:0(?:\.\d{0,3})?|1(?:\.0{0,3})?)$/.test(match[1])?Number(match[1]):0}
+  accepted.set(name,quality);
+ }
+ return (accepted.get('gzip')??accepted.get('*')??0)>0;
+}
+async function compressedStatic(file,info){
+ const version=info.size+':'+info.mtimeMs,key=file+':'+version,cached=staticGzipCache.get(file);
+ if(cached?.version===version){staticGzipCache.delete(file);staticGzipCache.set(file,cached);return cached.buffer}
+ if(staticGzipPending.has(key))return staticGzipPending.get(key);
+ const pending=(async()=>{
+  if(staticGzipReads>=2)await new Promise(resolve=>staticGzipWaiters.push(resolve));else staticGzipReads++;
+  try{
+   const source=await readFile(file),buffer=await new Promise((resolve,reject)=>gzip(source,{level:6},(error,value)=>error?reject(error):resolve(value)));
+   if(buffer.length<=2*1024*1024){
+    const old=staticGzipCache.get(file);if(old){staticGzipBytes-=old.buffer.length;staticGzipCache.delete(file)}
+    while(staticGzipCache.size&&(staticGzipBytes+buffer.length>STATIC_CACHE_BYTES||staticGzipCache.size>=128)){const oldest=staticGzipCache.keys().next().value;staticGzipBytes-=staticGzipCache.get(oldest).buffer.length;staticGzipCache.delete(oldest)}
+    staticGzipCache.set(file,{version,buffer});staticGzipBytes+=buffer.length;
+   }
+   return buffer;
+  }finally{const next=staticGzipWaiters.shift();if(next)next();else staticGzipReads--}
+ })().finally(()=>staticGzipPending.delete(key));staticGzipPending.set(key,pending);return pending;
+}
 async function body(req){let chunks=[],size=0;for await(const chunk of req){size+=chunk.length;if(size>16000)throw Error('body_too_large');chunks.push(chunk)}return JSON.parse(Buffer.concat(chunks).toString()||'{}')}
 const rate=new Map();
 function allowed(req){const read=req.method==='GET',limit=read?120:20,k=(read?'read:':'write:')+req.socket.remoteAddress,t=Date.now();let s=rate.get(k);if(!s||t-s.at>60000){rate.set(k,{at:t,n:1});if(rate.size>10000)rate.clear();return true}return ++s.n<=limit}
@@ -69,7 +99,12 @@ const server=http.createServer(async(req,res)=>{try{let url=new URL(req.url,'htt
  if(url.pathname==='/api/products'&&req.method==='GET'){
   const ids=(url.searchParams.get('ids')||'').split(',');
   if(!ids.length||ids.length>24||ids.some(id=>!productIdPattern.test(id)))return send(res,400,{error:'invalid_product_ids'});
-  return send(res,200,await readProducts([...new Set(ids)]));
+  const result=await readProducts([...new Set(ids)]);
+  if(url.searchParams.get('include')==='shops'){
+   const shops=await data('shops');result.shops={};
+   for(const product of result.products)for(const offer of product.offers||[])if(Object.hasOwn(shops,offer.shop))result.shops[offer.shop]=shops[offer.shop];
+  }
+  return send(res,200,result);
  }
  if(url.pathname.startsWith('/api/products/')&&req.method==='GET'){
   const id=url.pathname.slice('/api/products/'.length);if(!productIdPattern.test(id))return send(res,400,{error:'invalid_product_id'});
@@ -103,7 +138,12 @@ const server=http.createServer(async(req,res)=>{try{let url=new URL(req.url,'htt
  if(!['GET','HEAD'].includes(req.method)){res.writeHead(405);return res.end()}
  let decoded=decodeURIComponent(url.pathname),file=path.resolve(root,'.'+decoded);if(!file.startsWith(root+path.sep)&&file!==root){res.writeHead(403);return res.end()}
  if(decoded.endsWith('/'))file=path.join(file,'index.html');let info;try{info=await stat(file)}catch{res.writeHead(404);return res.end('Not found')}if(!info.isFile()){res.writeHead(404);return res.end()}
- const types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.gz':'application/gzip','.json':'application/json; charset=utf-8'};
- const etag='W/\"'+info.size.toString(16)+'-'+Math.trunc(info.mtimeMs).toString(16)+'\"',headers={'Content-Type':types[path.extname(file)]||'application/octet-stream','Cache-Control':file.includes(path.sep+'data'+path.sep)?'public, max-age=3600':'no-cache','ETag':etag,'X-Content-Type-Options':'nosniff','Referrer-Policy':'strict-origin-when-cross-origin'};if(req.headers['if-none-match']===etag){res.writeHead(304,headers);return res.end()}res.writeHead(200,{...headers,'Content-Length':info.size});if(req.method==='HEAD')return res.end();const stream=createReadStream(file);stream.on('error',()=>res.destroy());res.on('close',()=>stream.destroy());stream.pipe(res);
+ const extension=path.extname(file),types={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.gz':'application/gzip','.json':'application/json; charset=utf-8','.ttf':'font/ttf','.woff':'font/woff','.woff2':'font/woff2'};
+ const compressible=['.html','.js','.css','.json','.ttf'].includes(extension)&&info.size>=1024,compressed=compressible&&acceptsGzip(req.headers['accept-encoding']);
+ const etag='W/"'+info.size.toString(16)+'-'+Math.trunc(info.mtimeMs).toString(16)+'"',headers={'Content-Type':types[extension]||'application/octet-stream','Cache-Control':file.includes(path.sep+'data'+path.sep)?'public, max-age=3600':'no-cache','ETag':etag,'X-Content-Type-Options':'nosniff','Referrer-Policy':'strict-origin-when-cross-origin',...(compressible?{'Vary':'Accept-Encoding'}:{}),...(compressed?{'Content-Encoding':'gzip'}:{})};
+ if(req.headers['if-none-match']===etag){res.writeHead(304,headers);return res.end()}
+ if(compressed&&info.size<=STATIC_READ_BYTES){const buffer=await compressedStatic(file,info);res.writeHead(200,{...headers,'Content-Length':buffer.length});return res.end(req.method==='HEAD'?undefined:buffer)}
+ res.writeHead(200,{...headers,...(!compressed?{'Content-Length':info.size}:{})});if(req.method==='HEAD')return res.end();
+ const stream=createReadStream(file),output=compressed?createGzip():stream;stream.on('error',()=>res.destroy());output.on('error',()=>res.destroy());res.on('close',()=>{stream.destroy();if(output!==stream)output.destroy()});if(output!==stream)stream.pipe(output);output.pipe(res);
  }catch(e){send(res,e.message==='body_too_large'?413:e instanceof SyntaxError?400:500,{error:e.message==='body_too_large'?'request_too_large':e instanceof SyntaxError?'invalid_json':'request_failed'})}});
 server.listen(Number(process.env.PORT)||3000,'0.0.0.0',()=>{console.log(`TorobYar http://localhost:${Number(process.env.PORT)||3000}`);rowMap().catch(()=>console.error('Catalogue warm-up unavailable; the next request will retry'))});

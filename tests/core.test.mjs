@@ -1,6 +1,9 @@
 import {test,before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn} from 'node:child_process';
+import {request} from 'node:http';
+import {readFile} from 'node:fs/promises';
+import {gunzipSync} from 'node:zlib';
 import {rankRows} from '../dist/relevance.js';
 let child;const base='http://127.0.0.1:18789';
 before(async()=>{child=spawn(process.execPath,['server.mjs'],{env:{...process.env,PORT:'18789',AI_API_KEY:'',CALL_ADMIN_TOKEN:'',ELASTICSEARCH_URL:''},stdio:['ignore','pipe','pipe']});await new Promise((resolve,reject)=>{child.stdout.once('data',resolve);child.once('error',reject);child.once('exit',code=>reject(Error('server exited '+code)))})});
@@ -48,4 +51,39 @@ test('search pages preserve identities and expose lazy-loading boundaries',async
  assert.deepEqual([...first.results,...second.results],full.results);assert.equal(new Set(full.results.map(r=>r[0])).size,full.results.length);
  const end=await read('&offset=999999');assert.equal(end.results.length,0);assert.equal(end.nextOffset,null);assert.equal(end.hasMore,false);
  const health=await (await fetch(base+'/api/health')).json();assert.equal(health.search.fallback,'inverted');assert.equal(health.search.elasticsearch.configured,false);
+});
+
+function rawStatic(asset,headers={},method='GET'){
+ return new Promise((resolve,reject)=>{const req=request(base+asset,{headers,method},res=>{const chunks=[];res.on('data',chunk=>chunks.push(chunk));res.on('end',()=>resolve({status:res.statusCode,headers:res.headers,body:Buffer.concat(chunks)}));res.on('error',reject)});req.on('error',reject);req.end()});
+}
+test('static gzip round trips scripts, envelopes and raw fonts while honoring negotiation',async()=>{
+ for(const asset of ['/app.js','/data/meta.json','/fonts/vazirmatn-variable.ttf']){
+  const original=await rawStatic(asset,{'Accept-Encoding':'identity'});
+  assert.equal(original.status,200);assert.equal(original.headers['content-encoding'],undefined);
+  const compressed=await rawStatic(asset,{'Accept-Encoding':'gzip'});
+  assert.equal(compressed.headers['content-encoding'],'gzip');assert.equal(compressed.headers.vary,'Accept-Encoding');
+  assert.deepEqual(gunzipSync(compressed.body),original.body);assert.equal(Number(compressed.headers['content-length']),compressed.body.length);
+  assert.ok(compressed.body.length<original.body.length);
+  if(asset.endsWith('.ttf'))assert.equal(compressed.headers['content-type'],'font/ttf');
+ }
+ for(const encoding of ['gzip;q=0','gzip;q=0, *;q=1','br, gzip;q=0.000']){
+  const response=await rawStatic('/app.js',{'Accept-Encoding':encoding});assert.equal(response.headers['content-encoding'],undefined);assert.equal(response.headers.vary,'Accept-Encoding');
+ }
+ const wildcard=await rawStatic('/app.js',{'Accept-Encoding':'*;q=0.5'});assert.equal(wildcard.headers['content-encoding'],'gzip');
+});
+test('compressed static HEAD and conditional responses retain representation metadata without a body',async()=>{
+ const get=await rawStatic('/app.js',{'Accept-Encoding':'gzip'});
+ const head=await rawStatic('/app.js',{'Accept-Encoding':'gzip'},'HEAD');assert.equal(head.status,200);assert.equal(head.body.length,0);assert.equal(head.headers['content-length'],get.headers['content-length']);assert.equal(head.headers['content-encoding'],'gzip');
+ for(const method of ['GET','HEAD']){const response=await rawStatic('/app.js',{'Accept-Encoding':'gzip','If-None-Match':get.headers.etag},method);assert.equal(response.status,304);assert.equal(response.body.length,0);assert.equal(response.headers.etag,get.headers.etag);assert.equal(response.headers.vary,'Accept-Encoding');assert.equal(response.headers['content-length'],undefined)}
+});
+test('product batches optionally include only their exact full shop records',async()=>{
+ const unknown='product_000000000000000000000000',query='/api/products?ids='+[...products,unknown].join(',');
+ const result=await (await fetch(base+query+'&include=shops')).json();
+ const linked=[...new Set(result.products.flatMap(product=>product.offers.map(offer=>offer.shop)))].sort();
+ assert.deepEqual(Object.keys(result.shops).sort(),linked);assert.deepEqual(result.missing,[unknown]);
+ const envelope=JSON.parse(await readFile(new URL('../dist/data/shops.json',import.meta.url),'utf8'));
+ const shops=JSON.parse(gunzipSync(Buffer.from(envelope.gzip,'base64')));
+ for(const id of linked){assert.deepEqual(result.shops[id],shops[id]);assert.equal(result.shops[id].contactsSynthetic,true)}
+ assert.equal((await (await fetch(base+query)).json()).shops,undefined);
+ const missing=await (await fetch(base+'/api/products?ids='+unknown+'&include=shops')).json();assert.deepEqual(missing.shops,{});assert.deepEqual(missing.products,[]);assert.deepEqual(missing.missing,[unknown]);
 });
