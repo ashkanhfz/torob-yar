@@ -18,3 +18,7 @@ test('route uses lon-lat order, bounded snapping and actual engine values',async
   return {ok:true,json:async()=>({code:'Ok',routes:[{distance:1234,duration:567,geometry:{type:'LineString',coordinates:[[51.4,35.7],[51.42,35.75]]},legs:[{distance:1234,duration:567,steps:[{distance:1234,duration:567,name:'ولیعصر',maneuver:{type:'depart'}}]}]}],waypoints:[]})};
  }});const r=await route(points);assert.equal(r.status,200);assert.equal(r.body.distance,1234);assert.equal(r.body.duration,567);assert.equal(r.body.traffic,false);assert.equal(r.body.legs[0].steps[0].name,'ولیعصر');
 });
+test('public routing deduplicates and caches identical requests and throttles different routes',async()=>{
+ let calls=0,release;const waiting=new Promise(r=>release=r);const route=createRouting({baseURL:'https://router.project-osrm.org',fetcher:async()=>{calls++;await waiting;return {ok:true,json:async()=>({code:'Ok',routes:[{distance:1,duration:2,geometry:{type:'LineString',coordinates:[[51,35],[52,36]]},legs:[]} ]})}}});
+ const a=route(points),b=route(points);assert.equal(calls,1);assert.equal((await route([{lat:35.6,lon:51.3},points[1]])).status,429);release();assert.equal((await a).status,200);assert.equal((await b).status,200);assert.equal((await route(points)).body.cached,true);assert.equal(calls,1);
+});

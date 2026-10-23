@@ -1,6 +1,7 @@
 // Coordinates are supplied by the client; the upstream host is deployment configuration only.
 export function createRouting({baseURL=process.env.OSRM_BASE_URL,fetcher=fetch}={}) {
-  return async function route(points) {
+  const cache=new Map(),pending=new Map();let lastStart=-Infinity;
+  async function compute(points) {
     const fail=(status,error)=>({status,body:{error}});
     if(!Array.isArray(points)||points.length<2||points.length>6||points.some(p=>!p||!Number.isFinite(p.lat)||!Number.isFinite(p.lon)||Math.abs(p.lat)>90||Math.abs(p.lon)>180))return fail(400,'invalid_route_points');
     if(!baseURL)return fail(503,'routing_not_configured');
@@ -9,12 +10,24 @@ export function createRouting({baseURL=process.env.OSRM_BASE_URL,fetcher=fetch}=
       if(!['http:','https:'].includes(url.protocol)||url.username||url.password)return fail(503,'routing_not_configured');
       url.pathname='/route/v1/driving/'+points.map(p=>`${p.lon},${p.lat}`).join(';');
       url.search=new URLSearchParams({steps:'true',geometries:'geojson',overview:'full',alternatives:'false',radiuses:points.map(()=>'200').join(';')}).toString();
-      const response=await fetcher(url,{signal:AbortSignal.timeout(10000)});
+      const response=await fetcher(url,{signal:AbortSignal.timeout(10000),headers:{'User-Agent':'TorobYar-Demo/1.0 (+https://github.com/ashkanhfz/torob-yar)'}});
       const data=await response.json(),r=data.routes?.[0];
       if(['NoRoute','NoSegment'].includes(data.code))return fail(422,'route_not_found');
       if(!response.ok)return fail(502,'routing_unavailable');
       if(data.code!=='Ok'||!r||!Number.isFinite(r.distance)||!Number.isFinite(r.duration)||r.geometry?.type!=='LineString'||!Array.isArray(r.geometry.coordinates)||!Array.isArray(r.legs))return fail(502,'routing_invalid_response');
-      return {status:200,body:{engine:'OSRM',profile:'driving',traffic:false,distance:r.distance,duration:r.duration,geometry:r.geometry,legs:r.legs.map(leg=>({distance:leg.distance,duration:leg.duration,steps:(leg.steps||[]).map(s=>({distance:s.distance,duration:s.duration,name:String(s.name||'').slice(0,200),maneuver:s.maneuver}))})),waypoints:(data.waypoints||[]).map(p=>({location:p.location,distance:p.distance,name:p.name}))}};
+      return {status:200,body:{engine:'OSRM',provider:baseURL.includes('router.project-osrm.org')?'OSRM public demo':'configured OSRM',profile:'driving',traffic:false,distance:r.distance,duration:r.duration,geometry:r.geometry,legs:r.legs.map(leg=>({distance:leg.distance,duration:leg.duration,steps:(leg.steps||[]).map(s=>({distance:s.distance,duration:s.duration,name:String(s.name||'').slice(0,200),maneuver:s.maneuver}))})),waypoints:(data.waypoints||[]).map(p=>({location:p.location,distance:p.distance,name:p.name}))}};
     }catch{return fail(502,'routing_unavailable')}
+  }
+  return async function route(points){
+    if(!Array.isArray(points)||points.some(p=>!p||!Number.isFinite(p.lat)||!Number.isFinite(p.lon))||points.length<2||points.length>6)return compute(points);
+    const key=JSON.stringify(points.map(p=>[p.lat,p.lon])),now=Date.now(),hit=cache.get(key);
+    if(hit&&hit.expires>now)return {...hit.result,body:{...hit.result.body,cached:true}};
+    if(pending.has(key))return pending.get(key);
+    // One public upstream request per 1.1 seconds across this single app replica.
+    const isPublic=baseURL?.includes('router.project-osrm.org');
+    if(isPublic&&now-lastStart<1100)return {status:429,body:{error:'routing_busy'}};
+    if(isPublic)lastStart=now;
+    const task=compute(points).then(result=>{if(result.status===200){cache.delete(key);cache.set(key,{result,expires:Date.now()+300000});while(cache.size>64)cache.delete(cache.keys().next().value)}return result}).finally(()=>pending.delete(key));
+    pending.set(key,task);return task;
   };
 }
