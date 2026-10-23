@@ -1,7 +1,8 @@
 FROM node:22-alpine
 WORKDIR /app
-COPY package.json server.mjs operations.mjs advisor.mjs elastic.mjs routing.mjs entrypoint.mjs ./
+COPY package.json server.mjs operations.mjs advisor.mjs elastic.mjs routing.mjs entrypoint.mjs search-index.mjs ./
 COPY dist ./dist
+RUN node --max-old-space-size=320 search-index.mjs --build
 ENV NODE_ENV=production
 ENV PORT=3000
 EXPOSE 3000
